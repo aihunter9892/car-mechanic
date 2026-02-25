@@ -49,6 +49,10 @@ Output format (always):
 def home():
     return render_template("index.html")
 
+# ✅ Add this health endpoint here
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
 
 @app.post("/api/chat")
 def chat():
