@@ -1,0 +1,48 @@
+name: Docker Build + Smoke Test
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t car-mechanic:test .
+
+      - name: Run container (smoke test)
+        run: |
+          # Run container on port 8080
+          docker run -d --name car-mechanic-test -p 8080:8080 \
+            -e PORT=8080 \
+            -e GROQ_API_KEY=dummy_key \
+            car-mechanic:test
+
+          # Wait a few seconds for Flask/Gunicorn to start
+          sleep 6
+
+      - name: Check /health endpoint
+        run: |
+          # -f makes curl fail the step if not 200
+          curl -f http://localhost:8080/health
+
+      - name: Check home page loads
+        run: |
+          curl -f http://localhost:8080/
+
+      - name: Show container logs if something fails
+        if: failure()
+        run: |
+          docker logs car-mechanic-test || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f car-mechanic-test || true
