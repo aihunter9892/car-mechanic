@@ -1,0 +1,79 @@
+name: Docker Smoke Test + Push to ECR (Keys)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "998191239514"
+  ECR_REPO: car-mechanic
+
+jobs:
+  build-test-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 1) Build image locally on runner
+      - name: Build Docker image (local)
+        run: |
+          docker build -t car-mechanic:test .
+
+      # 2) Run and smoke test
+      - name: Run container (smoke test)
+        run: |
+          docker run -d --name car-mechanic-test \
+            -p 8080:8080 \
+            -e PORT=8080 \
+            -e GROQ_API_KEY=dummy_key \
+            car-mechanic:test
+          sleep 10
+
+      - name: Check /health
+        run: |
+          curl -f http://localhost:8080/health
+
+      - name: Check home page loads
+        run: |
+          curl -f http://localhost:8080/
+
+      - name: Logs (only if failure)
+        if: failure()
+        run: |
+          docker logs car-mechanic-test || true
+
+      - name: Cleanup container
+        if: always()
+        run: |
+          docker rm -f car-mechanic-test || true
+
+      # 3) Configure AWS credentials (from GitHub Secrets)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 4) Login to ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 5) Tag + push to ECR (latest + sha)
+      - name: Tag and push to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_SHA: ${{ github.sha }}
+        run: |
+          docker tag car-mechanic:test $ECR_REGISTRY/${{ env.ECR_REPO }}:latest
+          docker tag car-mechanic:test $ECR_REGISTRY/${{ env.ECR_REPO }}:$IMAGE_SHA
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO }}:latest
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO }}:$IMAGE_SHA
